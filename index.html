@@ -1,0 +1,978 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Tetris with piece queue, cache, and cycling</title>
+<style>
+  @keyframes pulse {
+    0% { opacity: 1; }
+    50% { opacity: 0.5; }
+    100% { opacity: 1; }
+  }
+
+  body {
+    background: #000;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    margin: 0;
+    color: white;
+    font-family: monospace;
+  }
+  canvas {
+    background: black;
+    border: 2px solid white;
+    display: block;
+  }
+  #info {
+    text-align: center;
+    margin-bottom: 6px;
+  }
+</style>
+</head>
+<body>
+<div style="display: flex; flex-direction: column; align-items: center;">
+  <div style="display: flex; justify-content: center; align-items: flex-end; gap: 40px; margin-bottom: 8px;">
+    <div style="text-align: center;">
+      <div>Cached Block:</div>
+      <canvas id="cached" width="80" height="80"></canvas>
+    </div>
+    <div style="text-align: center;">
+      <div>Next Block:</div>
+      <canvas id="next" width="80" height="80"></canvas>
+    </div>
+  </div>
+  <canvas id="tetris" width="200" height="440" style="margin-bottom: 12px;"></canvas>
+  <div id="explosion-bar" style="width: 200px; height: 20px; border: 2px solid #FFA500; margin-bottom: 12px; position: relative; overflow: hidden; cursor: pointer;" onclick="if(explosionAvailable) shootDownAndClearTop()" title="Clear 30 lines to activate explosion">
+    <div class="fill" style="width: 0%; height: 100%; background: linear-gradient(to right, #FF4500, #FFA500); transition: width 0.3s ease-out;"></div>
+    <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 12px; text-shadow: 1px 1px 2px black;">
+      <span id="lines-text">0/30 lines</span>
+    </div>
+  </div>
+  <div id="info">
+    <div>
+      Controls: ← → ↓ to move/drop, ↑ to rotate, C to cache/swap, Space for hard drop, L to discard cached (once), D for explosion
+    </div>
+  </div>
+</div>
+<script>
+  const canvas = document.getElementById('tetris');
+  const ctx = canvas.getContext('2d');
+  ctx.scale(20, 20);
+
+  // Cached and next block canvases
+  const cachedCanvas = document.getElementById('cached');
+  const cachedCtx = cachedCanvas.getContext('2d');
+  cachedCtx.scale(20, 20);
+
+  const nextCanvas = document.getElementById('next');
+  const nextCtx = nextCanvas.getContext('2d');
+  nextCtx.scale(20, 20);
+
+  const arenaWidth = 10;
+  const arenaHeight = 20;
+
+  let arenaOffset = 0; // Track how much the arena has expanded
+
+  function expandArena() {
+    // Add 10 columns to both sides
+    const newColumns = 10;
+    arenaOffset += newColumns;
+    
+    // Create random 4 rows template that will be used for both sides
+    const createRandomRows = () => {
+      const rows = [];
+      for (let i = 0; i < 4; i++) {
+        const row = new Array(newColumns).fill(0);
+        // Fill about 60% of the cells with random pieces
+        for (let j = 0; j < newColumns; j++) {
+          if (Math.random() < 0.6) {
+            row[j] = Math.floor(Math.random() * 7) + 1;
+          }
+        }
+        rows.push(row);
+      }
+      return rows;
+    };
+
+    // Create random rows for both sides
+    const leftRandomRows = createRandomRows();
+    const rightRandomRows = createRandomRows();
+
+    // Create new empty arena with expanded width
+    const oldArena = [...arena];
+    arena.length = 0;
+    
+    // Initialize new expanded arena
+    const fullWidth = arenaWidth + (newColumns * 2);
+    for (let i = 0; i < arenaHeight; i++) {
+      arena.push(new Array(fullWidth).fill(0));
+    }
+    
+    // Copy the original arena content to the center
+    for (let y = 0; y < arenaHeight; y++) {
+      for (let x = 0; x < arenaWidth; x++) {
+        arena[y][x + newColumns] = oldArena[y][x];
+      }
+    }
+    
+    // Add random blocks at the bottom 4 rows on both sides using the same method
+    for (let y = arenaHeight - 4; y < arenaHeight; y++) {
+      const rowIndex = y - (arenaHeight - 4);
+      
+      // Add left side random blocks
+      for (let x = 0; x < newColumns; x++) {
+        arena[y][x] = leftRandomRows[rowIndex][x];
+      }
+      
+      // Add right side random blocks
+      for (let x = 0; x < newColumns; x++) {
+        arena[y][arenaWidth + newColumns + x] = rightRandomRows[rowIndex][x];
+      }
+    }
+
+  // Update the canvas size only (do not scale or translate here)
+  canvas.width = fullWidth * 20;
+  // Scaling and translation will be handled in draw()
+  }
+
+  // Arena grid
+  const arena = [];
+  for (let i = 0; i < arenaHeight; i++) {
+    arena.push(new Array(arenaWidth).fill(0));
+  }
+
+  const pieces = {
+    1: {
+      matrix: [
+        [0,0,0,0],
+        [1,1,1,1],
+        [0,0,0,0],
+        [0,0,0,0]
+      ],
+      color: 'cyan'
+    },
+    2: {
+      matrix: [
+        [1,0,0],
+        [1,1,1],
+        [0,0,0]
+      ],
+      color: 'blue'
+    },
+    3: {
+      matrix: [
+        [0,0,1],
+        [1,1,1],
+        [0,0,0]
+      ],
+      color: 'orange'
+    },
+    4: {
+      matrix: [
+        [1,1],
+        [1,1]
+      ],
+      color: 'yellow'
+    },
+    5: {
+      matrix: [
+        [0,1,1],
+        [1,1,0],
+        [0,0,0]
+      ],
+      color: 'green'
+    },
+    6: {
+      matrix: [
+        [0,1,0],
+        [1,1,1],
+        [0,0,0]
+      ],
+      color: 'purple'
+    },
+    7: {
+      matrix: [
+        [1,1,0],
+        [0,1,1],
+        [0,0,0]
+      ],
+      color: 'red'
+    }
+  };
+
+  // The queue of next pieces (IDs)
+  const nextPieces = [];
+  const nextQueueSize = 5;
+
+  // Initialize nextPieces queue
+  function fillNextQueue() {
+    while(nextPieces.length < nextQueueSize) {
+      nextPieces.push(randomPieceID());
+    }
+  }
+
+  function randomPieceID() {
+    return Math.floor(Math.random() * 7) + 1;
+  }
+
+  // Cached piece
+  let cachedPiece = null;
+  let cachedDiscardUsed = false; // one discard per cached piece
+
+  // Player object
+  const player = {
+    pos: {x: 4, y: 0},
+    matrix: null,
+    color: null,
+    id: 0
+  };
+
+  // Spawn a piece from the front of nextPieces queue
+  function playerReset() {
+    fillNextQueue();
+    const id = nextPieces.shift();
+    fillNextQueue();
+
+    player.id = id;
+    player.matrix = pieces[id].matrix;
+    player.color = pieces[id].color;
+    player.pos.y = 0;
+    player.pos.x = Math.floor((arenaWidth - player.matrix[0].length) / 2);
+
+    cachedDiscardUsed = false; // reset discard usage on new piece
+
+    // Account for arena offset in spawn position
+    if (firstRowCleared) {
+      player.pos.x += arenaOffset;
+    }
+
+    if (collide(arena, player)) {
+      // Game over, clear arena
+      for(let y=0; y<arena.length; y++) {
+        arena[y].fill(0);
+      }
+      firstRowCleared = false; // Reset expansion state
+      arenaOffset = 0; // Reset arena offset
+      canvas.width = arenaWidth * 20; // Reset canvas size
+      ctx.scale(20, 20); // Reset scale
+    }
+  }
+
+  // Drawing helpers (rounded connected blocks)
+  function drawConnectedBlock(x, y, width, height, radius, color, edges, context=ctx) {
+    context.fillStyle = color;
+    context.beginPath();
+
+    context.moveTo(x + (edges.left ? radius : 0), y);
+    context.lineTo(x + width - (edges.right ? radius : 0), y);
+    if (edges.right) context.quadraticCurveTo(x + width, y, x + width, y + (edges.top ? radius : 0));
+    else context.lineTo(x + width, y);
+
+    context.lineTo(x + width, y + height - (edges.bottom ? radius : 0));
+    if (edges.bottom) context.quadraticCurveTo(x + width, y + height, x + width - (edges.right ? radius : 0), y + height);
+    else context.lineTo(x + width, y + height);
+
+    context.lineTo(x + (edges.left ? radius : 0), y + height);
+    if (edges.left) context.quadraticCurveTo(x, y + height, x, y + height - (edges.bottom ? radius : 0));
+    else context.lineTo(x, y + height);
+
+    context.lineTo(x, y + (edges.top ? radius : 0));
+    if (edges.top) context.quadraticCurveTo(x, y, x + (edges.left ? radius : 0), y);
+    else context.lineTo(x, y);
+
+    context.closePath();
+    context.fill();
+
+    context.lineWidth = 0.05;
+    context.strokeStyle = 'black';
+    context.stroke();
+  }
+
+  function drawMatrix(matrix, offset, color, context=ctx) {
+    const rows = matrix.length;
+    const cols = matrix[0].length;
+    const radius = 0.15;
+
+    for (let y = 0; y < rows; y++) {
+      for (let x = 0; x < cols; x++) {
+        if (matrix[y][x] !== 0) {
+          const top = (y === 0 || matrix[y-1][x] === 0);
+          const bottom = (y === rows - 1 || matrix[y+1][x] === 0);
+          const left = (x === 0 || matrix[y][x-1] === 0);
+          const right = (x === cols - 1 || matrix[y][x+1] === 0);
+
+          drawConnectedBlock(
+            x + offset.x,
+            y + offset.y,
+            1,
+            1,
+            radius,
+            color,
+            {top, bottom, left, right},
+            context
+          );
+        }
+      }
+    }
+  }
+
+  function drawArena() {
+    const fullWidth = arenaWidth + (arenaOffset * 2);
+    for(let y = 0; y < arenaHeight; y++) {
+      for(let x = 0; x < fullWidth; x++) {
+        const val = arena[y][x];
+        if(val !== 0) {
+          const color = pieces[val].color;
+          const top = (y === 0 || arena[y-1][x] === 0);
+          const bottom = (y === arenaHeight-1 || arena[y+1][x] === 0);
+          const left = (x === 0 || arena[y][x-1] === 0);
+          const right = (x === fullWidth-1 || arena[y][x+1] === 0);
+
+          // Translate the x-coordinate back to game coordinates
+          const gameX = x - arenaOffset;
+          drawConnectedBlock(
+            gameX, y, 1, 1, 0.15, color,
+            {top, bottom, left, right}
+          );
+        }
+      }
+    }
+  }
+
+  function drawGrid() {
+    const fullWidth = arenaWidth + (arenaOffset * 2);
+    ctx.strokeStyle = '#333';
+    ctx.lineWidth = 0.05;
+
+    // Draw vertical lines (cover full expanded width)
+    for(let x = -arenaOffset; x <= arenaWidth + arenaOffset * 2; x++) {
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, arenaHeight);
+      ctx.stroke();
+    }
+
+    // Draw horizontal lines
+    for(let y = 0; y <= arenaHeight; y++) {
+      ctx.beginPath();
+      ctx.moveTo(-arenaOffset, y);
+      ctx.lineTo(arenaWidth + arenaOffset * 2, y);
+      ctx.stroke();
+    }
+
+    // Highlight the original play area
+    ctx.strokeStyle = '#666';
+    ctx.lineWidth = 0.1;
+    ctx.strokeRect(0, 0, arenaWidth, arenaHeight);
+  }
+
+  // Draw cached and next piece previews on their canvases
+  function drawPreview(ctx, pieceID) {
+    ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+    if (!pieceID) return;
+    const piece = pieces[pieceID];
+    const matrix = piece.matrix;
+
+    // Center the piece in the 4x4 grid (canvas is 4x4 logical units)
+    const cols = matrix[0].length;
+    const rows = matrix.length;
+    // Use floating point for perfect centering
+    const offsetX = (4 - cols) / 2;
+    const offsetY = (4 - rows) / 2;
+
+    drawMatrix(matrix, {x: offsetX, y: offsetY}, piece.color, ctx);
+  }
+
+  // Collision detection
+  function collide(arena, player) {
+    const m = player.matrix;
+    const o = player.pos;
+    const fullWidth = arenaWidth + (arenaOffset * 2);
+    
+    for (let y = 0; y < m.length; y++) {
+      for (let x = 0; x < m[y].length; x++) {
+        if (m[y][x] !== 0) {
+          const worldX = o.x + x;
+          const arenaX = worldX + arenaOffset;
+          if (
+            o.y + y >= arenaHeight ||
+            arenaX < 0 ||
+            arenaX >= fullWidth ||
+            arena[o.y + y][arenaX] !== 0
+          ) {
+            return true;
+          }
+        }
+      }
+    }
+    return false;
+  }
+
+  // Merge piece into arena
+  function merge(arena, player) {
+    const fullWidth = arenaWidth + (arenaOffset * 2);
+    player.matrix.forEach((row, y) => {
+      row.forEach((value, x) => {
+        if (value !== 0) {
+          const worldX = player.pos.x + x;
+          const arenaX = worldX + arenaOffset;
+          if (arenaX >= 0 && arenaX < fullWidth) {
+            arena[player.pos.y + y][arenaX] = player.id;
+          }
+        }
+      });
+    });
+  }
+
+  // Clear full rows and return count cleared
+  let totalLinesCleared = 0;
+  const requiredLinesForExplosion = 30;
+  let explosionAvailable = false;
+
+  function updateExplosionBar() {
+    const progressBar = document.querySelector('#explosion-bar .fill');
+    const progress = (totalLinesCleared / requiredLinesForExplosion) * 100;
+    progressBar.style.width = progress + '%';
+    document.getElementById('lines-text').textContent = totalLinesCleared + '/30 lines';
+    
+    if (totalLinesCleared >= requiredLinesForExplosion && !explosionAvailable) {
+      explosionAvailable = true;
+      progressBar.style.animation = 'pulse 1.5s infinite';
+    }
+  }
+
+  let firstRowCleared = false;
+
+  function arenaSweep() {
+    let rowCount = 0;
+    const fullWidth = arenaWidth + (arenaOffset * 2);
+    
+    outer: for (let y = arenaHeight - 1; y >= 0; y--) {
+      for (let x = 0; x < fullWidth; x++) {
+        if (arena[y][x] === 0) {
+          continue outer; // skip if not full
+        }
+      }
+      // Remove full row
+      const row = arena.splice(y, 1)[0].fill(0);
+      arena.unshift(row);
+      y++; // recheck same row index after shifting
+      rowCount++;
+    }
+
+    if (rowCount > 0) {
+      totalLinesCleared += rowCount;
+      updateExplosionBar();
+      
+      // If this is the first row cleared, expand the grid
+      if (!firstRowCleared) {
+        firstRowCleared = true;
+        expandArena();
+        // Update player position to account for the offset
+        player.pos.x += arenaOffset;
+      }
+    }
+    
+    return rowCount;
+  }
+
+  // Player moves down
+  function playerDrop() {
+    player.pos.y++;
+    if (collide(arena, player)) {
+      player.pos.y--;
+      merge(arena, player);
+      arenaSweep();
+      playerReset();
+      updatePreviews();
+    }
+  }
+
+  function playerMove(dir) {
+    player.pos.x += dir;
+    if (collide(arena, player)) {
+      player.pos.x -= dir;
+    }
+  }
+
+  // Rotate matrix clockwise
+  function rotate(matrix) {
+    const rows = matrix.length;
+    const cols = matrix[0].length;
+    const rotated = [];
+    for (let x = 0; x < cols; x++) {
+      rotated[x] = [];
+      for (let y = 0; y < rows; y++) {
+        rotated[x][rows - 1 - y] = matrix[y][x];
+      }
+    }
+    return rotated;
+  }
+
+  // Rotate player piece with collision correction
+  function playerRotate() {
+    const rotated = rotate(player.matrix);
+    const posX = player.pos.x;
+    player.matrix = rotated;
+
+    let offset = 1;
+    while (collide(arena, player)) {
+      player.pos.x += offset;
+      offset = -(offset + (offset > 0 ? 1 : -1));
+      if (offset > player.matrix[0].length) {
+        player.matrix = rotate(rotate(rotate(rotated)));
+        player.pos.x = posX;
+        return;
+      }
+    }
+  }
+
+  // Cycle nextPieces forward
+  function cycleNextForward() {
+    if (nextPieces.length > 1) {
+      const first = nextPieces.shift();
+      nextPieces.push(first);
+      updatePreviews();
+    }
+  }
+
+  // Cycle nextPieces backward
+  function cycleNextBackward() {
+    if (nextPieces.length > 1) {
+      const last = nextPieces.pop();
+      nextPieces.unshift(last);
+      updatePreviews();
+    }
+  }
+
+  // Game-wide flag for one-time cache discard
+  let globalCacheDiscardUsed = false;
+
+  // Discard cached piece once per game
+  function discardCached() {
+    if (!cachedPiece) return;
+    if (globalCacheDiscardUsed) {
+      // Optional: flash the cached piece preview to indicate it can't be discarded
+      const cachedCanvas = document.getElementById('cached');
+      cachedCanvas.style.opacity = '0.3';
+      setTimeout(() => cachedCanvas.style.opacity = '1', 200);
+      return;
+    }
+    cachedPiece = null;
+    globalCacheDiscardUsed = true;
+    cachedDiscardUsed = true;
+    updatePreviews();
+  }
+
+  // Swap cached piece with current player piece
+  function swapCached() {
+    if (!cachedPiece) {
+      cachedPiece = {id: player.id, matrix: player.matrix, color: player.color};
+      playerReset();
+    } else {
+      const temp = cachedPiece;
+      cachedPiece = {id: player.id, matrix: player.matrix, color: player.color};
+      player.id = temp.id;
+      player.matrix = temp.matrix;
+      player.color = temp.color;
+      player.pos.y = 0;
+      player.pos.x = Math.floor((arenaWidth - player.matrix[0].length) / 2);
+    }
+    cachedDiscardUsed = false;
+    updatePreviews();
+  }
+
+  // Draw everything
+  function draw() {
+    // Always reset transform before drawing
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.scale(20, 20);
+    ctx.fillStyle = 'black';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    drawGrid();
+    drawArena();
+    if (player.matrix) {
+      drawMatrix(player.matrix, player.pos, player.color);
+    }
+  }
+
+  function updatePreviews() {
+    drawPreview(cachedCtx, cachedPiece ? cachedPiece.id : null);
+    drawPreview(nextCtx, nextPieces[0]);
+  }
+
+  // Explosion animation state
+  let explosionAnimating = false;
+
+  // Determine up to 4 lines below the current player piece and animate a "big boom"
+  function blowUpLinesBelow() {
+    if (explosionAnimating) return; // avoid re-triggering while animating
+
+    const startY = player.pos.y + (player.matrix ? player.matrix.length : 0);
+    const lines = [];
+    for (let i = 0; i < 4; i++) {
+      const y = startY + i;
+      if (y >= 0 && y < arenaHeight) {
+  // Always include the row so the explosion always triggers visually
+  lines.push(y);
+      }
+    }
+    if (lines.length === 0) return;
+    startExplosionAnimation(lines);
+  }
+
+  // Start a non-blocking explosion animation over the specified rows.
+  function startExplosionAnimation(lines) {
+    explosionAnimating = true;
+
+    // Build particle list from every non-empty cell in the selected lines
+    const particles = [];
+    for (const y of lines) {
+      for (let x = 0; x < arenaWidth; x++) {
+        const val = arena[y][x];
+        const occupied = val !== 0;
+        const baseColor = occupied ? (pieces[val].color || 'white') : (Math.random() > 0.5 ? 'orange' : 'yellow');
+        const count = occupied ? 12 : 6; // more particles for occupied cells
+        for (let i = 0; i < count; i++) {
+          const angle = Math.random() * Math.PI * 2;
+          const speed = (occupied ? 1.6 : 1.0) + Math.random() * (occupied ? 2.4 : 1.6);
+          particles.push({
+            x: x + 0.5,
+            y: y + 0.5,
+            vx: Math.cos(angle) * speed,
+            vy: Math.sin(angle) * speed - (Math.random() * 1.2),
+            life: 30 + Math.floor(Math.random() * 30),
+            age: 0,
+            color: baseColor
+          });
+        }
+      }
+    }
+
+    // Add a couple shockwave objects (one per line) for the "big boom" feel
+    const shocks = lines.map(y => ({ x: arenaWidth / 2, y: y + 0.5, r: 0, alpha: 1 }));
+
+    function step() {
+      // Update physics
+      for (const p of particles) {
+        p.vy += 0.06; // gravity
+        p.x += p.vx * 0.18;
+        p.y += p.vy * 0.18;
+        p.age++;
+      }
+      for (const s of shocks) {
+        s.r += 0.9 + Math.random() * 0.6;
+        s.alpha -= 0.02;
+      }
+
+      // Render scene (draw board first so explosion overlays it)
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      drawGrid();
+      drawArena();
+      if (player.matrix) drawMatrix(player.matrix, player.pos, player.color);
+
+      // Particle layer
+      ctx.save();
+      for (const p of particles) {
+        const alive = p.age < p.life;
+        if (!alive) continue;
+        const t = 1 - p.age / p.life; // 1 -> 0
+        ctx.globalAlpha = Math.max(0, t);
+        // draw glow circle
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 0.08 + (1 - t) * 0.45, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // Shockwave rings
+      ctx.globalAlpha = 0.9;
+      ctx.lineWidth = 0.06;
+      for (const s of shocks) {
+        ctx.globalAlpha = Math.max(0, s.alpha * 0.9);
+        ctx.strokeStyle = 'orange';
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      ctx.restore();
+
+      // Remove dead particles
+      for (let i = particles.length - 1; i >= 0; i--) {
+        if (particles[i].age >= particles[i].life) particles.splice(i, 1);
+      }
+
+      // Continue or finish
+      if (particles.length > 0) {
+        requestAnimationFrame(step);
+      } else {
+        // clear the lines now that animation finished
+        for (const y of lines) {
+          arena[y].fill(0);
+        }
+        draw();
+        explosionAnimating = false;
+      }
+    }
+
+    requestAnimationFrame(step);
+  }
+
+  // Pause/resume drop interval helpers
+  function pauseDropInterval() {
+    if (dropInterval) {
+      clearInterval(dropInterval);
+      dropInterval = null;
+    }
+  }
+  function resumeDropInterval() {
+    if (!dropInterval) {
+      dropInterval = setInterval(() => {
+        playerDrop();
+        draw();
+      }, 1000);
+    }
+  }
+
+  // Animate the player piece shooting down with flame trail, then explode and clear 4 rows
+  function shootDownAndClearTop() {
+    if (explosionAnimating) return;
+    explosionAnimating = true;
+
+    try {
+      pauseDropInterval();
+
+      // Create particles for bottom 4 rows
+      const particles = [];
+      const shockwaves = [];
+
+      // Create explosion particles for bottom 4 rows
+      const fullWidth = arenaWidth + (arenaOffset * 2);
+      for (let y = arenaHeight - 4; y < arenaHeight; y++) {
+        for (let x = 0; x < fullWidth; x++) {
+          const val = arena[y][x];
+          const color = val !== 0 ? pieces[val].color : '#FFA500';
+          
+          // More particles for occupied cells
+          const particleCount = val !== 0 ? 15 : 8;
+          
+          for (let i = 0; i < particleCount; i++) {
+            const angle = Math.random() * Math.PI * 2;
+            const speed = 1.5 + Math.random() * 2;
+            // Adjust x position by subtracting arenaOffset to match game coordinates
+            const gameX = x - arenaOffset;
+            particles.push({
+              x: gameX + 0.5,
+              y: y + 0.5,
+              vx: Math.cos(angle) * speed,
+              vy: Math.sin(angle) * speed - Math.random() * 2,
+              life: 40 + Math.floor(Math.random() * 20),
+              age: 0,
+              color: color,
+              size: 0.15 + Math.random() * 0.2
+            });
+          }
+        }
+        
+        // Add shockwave for each row
+        shockwaves.push({
+          x: arenaWidth / 2,
+          y: y + 0.5,
+          r: 0,
+          alpha: 1,
+          speed: 0.6 + Math.random() * 0.4
+        });
+      }
+
+      let animationFrame = 0;
+      const totalFrames = 45;
+      const blocksFalling = [];
+
+      // Prepare blocks that need to fall
+      for (let y = arenaHeight - 5; y >= 0; y--) {
+        for (let x = 0; x < arenaWidth; x++) {
+          if (arena[y][x] !== 0) {
+            blocksFalling.push({
+              x: x,
+              startY: y,
+              targetY: y + 4,
+              val: arena[y][x],
+              progress: 0
+            });
+          }
+        }
+      }
+
+      function animate() {
+        if (animationFrame >= totalFrames) {
+          // Animation complete, move all blocks down
+          for (let y = arenaHeight - 1; y >= 4; y--) {
+            arena[y].fill(0);
+            if (y >= 4) {
+              for (let x = 0; x < arenaWidth; x++) {
+                arena[y][x] = arena[y - 4][x];
+              }
+            }
+          }
+          // Clear top 4 rows
+          for (let y = 0; y < 4; y++) {
+            arena[y].fill(0);
+          }
+          
+          explosionAnimating = false;
+          draw();
+          resumeDropInterval();
+          return;
+        }
+
+        // Clear canvas
+        ctx.fillStyle = 'black';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        drawGrid();
+
+        // Draw arena state during transition
+        for (let y = 0; y < arenaHeight - 4; y++) {
+          for (let x = 0; x < arenaWidth; x++) {
+            const val = arena[y][x];
+            if (val !== 0) {
+              const block = blocksFalling.find(b => b.x === x && b.startY === y);
+              if (block) {
+                const progress = Math.min(1, animationFrame / totalFrames);
+                const currentY = block.startY + (block.targetY - block.startY) * progress;
+                drawConnectedBlock(
+                  x, currentY, 1, 1, 0.15, pieces[val].color,
+                  {top: true, bottom: true, left: true, right: true}
+                );
+              }
+            }
+          }
+        }
+
+        // Update and draw particles
+        ctx.save();
+        particles.forEach((p, i) => {
+          p.vy += 0.15; // gravity
+          p.x += p.vx * 0.15;
+          p.y += p.vy * 0.15;
+          p.age++;
+
+          if (p.age < p.life) {
+            const alpha = 1 - (p.age / p.life);
+            ctx.globalAlpha = alpha;
+            ctx.fillStyle = p.color;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, p.size * (1 + (1 - alpha)), 0, Math.PI * 2);
+            ctx.fill();
+          } else {
+            particles.splice(i, 1);
+          }
+        });
+
+        // Update and draw shockwaves
+        shockwaves.forEach((s, i) => {
+          s.r += s.speed;
+          s.alpha -= 0.02;
+
+          if (s.alpha > 0) {
+            ctx.globalAlpha = s.alpha;
+            ctx.strokeStyle = '#FFA500';
+            ctx.lineWidth = 0.1;
+            ctx.beginPath();
+            ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+            ctx.stroke();
+          } else {
+            shockwaves.splice(i, 1);
+          }
+        });
+        ctx.restore();
+
+        animationFrame++;
+        requestAnimationFrame(animate);
+      }
+
+      requestAnimationFrame(animate);
+    } catch (err) {
+      console.error('Error during explosion animation:', err);
+      explosionAnimating = false;
+      resumeDropInterval();
+    }
+  }
+
+  // Draw everything
+  function clearTopLines() {
+    for (let y = 0; y < 4; y++) {
+      if (arena[y].some(cell => cell !== 0)) {
+        arena[y].fill(0);
+      }
+    }
+    draw();
+  }  // Event handlers
+  window.addEventListener('keydown', event => {
+    if(event.key === 'ArrowLeft') {
+      playerMove(-1);
+      draw();
+    }
+    else if(event.key === 'ArrowRight') {
+      playerMove(1);
+      draw();
+    }
+    else if(event.key === 'ArrowDown') {
+      playerDrop();
+      draw();
+    }
+    else if(event.key === 'ArrowUp') {
+      playerRotate();
+      draw();
+    }
+    else if(event.key.toLowerCase() === 'c') {
+      // C: cache/swap current piece
+      swapCached();
+      draw();
+    }
+    else if(event.key === ' ' || event.code === 'Space') {
+      // Space: hard drop
+      while (!collide(arena, player)) {
+        player.pos.y++;
+      }
+      player.pos.y--; // step back to last valid
+      merge(arena, player);
+      arenaSweep();
+      playerReset();
+      updatePreviews();
+      draw();
+    }
+    else if(event.key.toLowerCase() === 'l') {
+      discardCached();
+      draw();
+    }
+    else if(event.key.toLowerCase() === 'd') {
+      if (explosionAvailable) {
+        shootDownAndClearTop();
+        // Reset progress after explosion
+        explosionAvailable = false;
+        totalLinesCleared = 0;
+        document.querySelector('#explosion-bar .fill').style.animation = 'none';
+        document.querySelector('#explosion-bar .fill').style.width = '0%';
+        document.getElementById('lines-text').textContent = '0/30 lines';
+      }
+    }
+  });
+
+  fillNextQueue();
+  playerReset();
+  updatePreviews();
+  draw();
+
+  let dropInterval = setInterval(() => {
+    playerDrop();
+    draw();
+  }, 1000);
+
+  // Update the info text to be more specific about the one-time cache discard
+  document.querySelector('#info div').textContent = 'Controls: ← → ↓ to move/drop, ↑ to rotate, C to cache/swap, Space for hard drop, L to discard cached (once per game), D for explosion';
+</script>
+</body>
+</html>
