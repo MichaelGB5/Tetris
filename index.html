@@ -222,20 +222,16 @@
   }
 
   #score-display {
-    position: fixed;
-    top: 20px;
-    left: 50%;
-    transform: translateX(-50%);
-    font-size: 48px;
+    position: relative;
+    font-size: 36px;
     color: #FFA500;
     text-shadow: 0 0 10px rgba(255, 165, 0, 0.5);
     font-family: monospace;
-    z-index: 999;
+    margin-bottom: 10px;
   }
 </style>
 </head>
 <body>
-<div id="score-display">SCORE: 0</div>
 <button class="settings-button" onclick="toggleSettings()">⚙️ Settings</button>
 <div class="settings-panel" id="settings-panel">
   <button class="settings-close" onclick="toggleSettings()">×</button>
@@ -258,6 +254,13 @@
 <div id="start-screen">
   <h1>TETRIS</h1>
   <div style="margin-bottom: 20px; text-align: center;">
+    <label style="color: #FFA500; display: block; margin-bottom: 10px;">Game Mode:</label>
+    <div style="display: flex; justify-content: center; gap: 10px;">
+      <button id="regular-mode" onclick="selectMode('regular')" style="background: #FFA500; color: black; border: none; padding: 10px 20px; font-size: 18px; font-family: monospace; cursor: pointer; transition: all 0.3s ease;">Regular</button>
+      <button id="challenge-mode" onclick="selectMode('challenge')" style="background: transparent; color: #FFA500; border: 2px solid #FFA500; padding: 10px 20px; font-size: 18px; font-family: monospace; cursor: pointer; transition: all 0.3s ease;">Challenge</button>
+    </div>
+  </div>
+  <div id="level-selection" style="margin-bottom: 20px; text-align: center; display: none;">
     <label for="level-select" style="color: #FFA500; display: block; margin-bottom: 10px;">Select Starting Level:</label>
     <select id="level-select" style="background: black; color: white; border: 2px solid #FFA500; padding: 5px 10px; font-size: 18px; font-family: monospace;">
       <option value="1">Level 1 - Normal</option>
@@ -275,6 +278,7 @@
   <button onclick="startGame()">START GAME</button>
 </div>
 <div style="display: flex; flex-direction: column; align-items: center;">
+  <div id="score-display">SCORE: 0</div>
   <div style="display: flex; justify-content: center; align-items: flex-end; gap: 40px; margin-bottom: 8px;">
     <div style="text-align: center;">
       <div>Cached Block:</div>
@@ -287,7 +291,7 @@
   </div>
   <canvas id="tetris" width="200" height="440" style="margin-bottom: 12px;"></canvas>
   <div style="width: 100%; text-align: center;">
-    <div class="progress-bar" id="level-bar" style="margin-bottom: 12px;">
+    <div class="progress-bar" id="level-bar" style="margin-bottom: 12px; display: none;">
       <div class="fill" style="width: 0%"></div>
       <div class="text">
         <span id="level-text">Level 1 - 0/5 lines</span>
@@ -922,24 +926,33 @@
       
       totalLinesCleared += rowCount;
       updateExplosionBar();
-      updateLevelProgress();
       
-      // Check for win condition (completing level 10)
-      if (level > 10) {
-        // Win condition!
-        alert('Congratulations! You completed all levels with ' + score + ' points!');
-        // Stop the game loop
-        if (dropInterval) {
-          clearInterval(dropInterval);
-          dropInterval = null;
+      if (!isRegularMode) {
+        updateLevelProgress();
+        
+        // Check for win condition (completing level 10)
+        if (level > 10) {
+          // Win condition!
+          alert('Congratulations! You completed all levels with ' + score + ' points!');
+          // Stop the game loop
+          if (dropInterval) {
+            clearInterval(dropInterval);
+            dropInterval = null;
+          }
+          // Show start screen
+          document.getElementById('start-screen').style.display = 'flex';
+          return rowCount;
         }
-        // Show start screen
-        document.getElementById('start-screen').style.display = 'flex';
+      }
+
+      // Always keep level 1 in regular mode
+      if (isRegularMode) {
+        level = 1;
       }
 
       // Update score display
       document.getElementById('info').innerHTML = 
-        '<div>Score: ' + score + ' | Level: ' + level + '</div>' +
+        '<div>Score: ' + score + (isRegularMode ? '' : ' | Level: ' + level) + '</div>' +
         '<div>Controls: ← → ↓ to move/drop, ↑ to rotate, C to cache/swap, Space for hard drop, L to discard cached (once per game), D for explosion</div>';
     }
     
@@ -1490,7 +1503,16 @@
   let linesCleared = 0;
 
   function updateLevelProgress() {
-    // Check if we've reached the score target for this level
+    if (isRegularMode) {
+      // Hide level bar and only show controls in regular mode
+      document.getElementById('level-bar').style.display = 'none';
+      document.getElementById('info').innerHTML = 
+        '<div>Controls: ← → ↓ to move/drop, ↑ to rotate, C to cache/swap, Space for hard drop, L to discard cached (once per game), D for explosion</div>';
+      return;
+    }
+
+    // Challenge mode: show level progress
+    document.getElementById('level-bar').style.display = 'block';
     const currentConfig = levelConfig[level];
     const progress = (score / currentConfig.scoreTarget) * 100;
     
@@ -1499,12 +1521,10 @@
     document.getElementById('level-text').textContent = 
       `Level ${level} - ${score}/${currentConfig.scoreTarget}`;
     
-    // Update game info display
+    // Update game info display for challenge mode
     document.getElementById('info').innerHTML = 
-      `<div>Score: ${score} | Level: ${level}</div>` +
-      '<div>Controls: ← → ↓ to move/drop, ↑ to rotate, C to cache/swap, Space for hard drop, L to discard cached (once per game), D for explosion</div>';
-    
-    // Check for level completion
+      `<div style="text-align: left; margin-bottom: 4px;">Level: ${level}</div>` +
+      '<div>Controls: ← → ↓ to move/drop, ↑ to rotate, C to cache/swap, Space for hard drop, L to discard cached (once per game), D for explosion</div>';    // Check for level completion
     if (score >= currentConfig.scoreTarget) {
       if (level === 5) {
         // Game complete!
@@ -1613,12 +1633,32 @@
     ctx.globalAlpha = originalAlpha;
   }
 
+  let isRegularMode = true;
+
+  function selectMode(mode) {
+    isRegularMode = mode === 'regular';
+    const regularBtn = document.getElementById('regular-mode');
+    const challengeBtn = document.getElementById('challenge-mode');
+    const levelSelection = document.getElementById('level-selection');
+
+    if (isRegularMode) {
+      regularBtn.style.background = '#FFA500';
+      regularBtn.style.color = 'black';
+      challengeBtn.style.background = 'transparent';
+      challengeBtn.style.color = '#FFA500';
+      levelSelection.style.display = 'none';
+    } else {
+      challengeBtn.style.background = '#FFA500';
+      challengeBtn.style.color = 'black';
+      regularBtn.style.background = 'transparent';
+      regularBtn.style.color = '#FFA500';
+      levelSelection.style.display = 'block';
+    }
+  }
+
   function startGame() {
     // Hide start screen
     document.getElementById('start-screen').style.display = 'none';
-    
-    // Get selected level
-    level = parseInt(document.getElementById('level-select').value);
     
     // Reset game state
     score = 0;
@@ -1631,31 +1671,49 @@
     if (dropInterval) {
       clearInterval(dropInterval);
     }
-    
-    // Setup the selected level
-    setupLevel(level);
+
+    if (isRegularMode) {
+      // Setup regular mode with standard 10x20 grid
+      arenaWidth = 10;
+      arenaHeight = 20;
+      level = 1; // Always stay at level 1 for regular mode
+      
+      // Create a regular Tetris grid with no obstacles
+      const newArena = createArena(arenaWidth, arenaHeight);
+      arena.length = 0;
+      arena.push(...newArena);
+      
+      // Update canvas size for standard Tetris grid
+      canvas.width = arenaWidth * 20;
+      canvas.height = arenaHeight * 20;
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.scale(20, 20);
+
+      // Hide level progress bar and level display
+      document.getElementById('level-bar').style.display = 'none';
+    } else {
+      // Challenge mode - setup the selected level
+      level = parseInt(document.getElementById('level-select').value);
+      setupLevel(level);
+      document.getElementById('level-bar').style.display = 'block';
+      updateLevelProgress();
+    }
     
     // Initialize game pieces
     fillNextQueue();
     playerReset();
     updatePreviews();
     
-    // Reset progress bars
+    // Reset explosion bar
     document.querySelector('#explosion-bar .fill').style.width = '0%';
     document.querySelector('#explosion-bar .fill').style.animation = 'none';
     document.getElementById('lines-text').textContent = '0/30 lines';
-    
-    // Update level progress display
-    updateLevelProgress();
     
     // Start game loop with fixed speed
     dropInterval = setInterval(() => {
       playerDrop();
       draw();
     }, 1000);
-    
-    // Initial draw
-    draw();
     
     // Initial draw
     draw();
