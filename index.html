@@ -229,9 +229,27 @@
     font-family: monospace;
     margin-bottom: 10px;
   }
+
+  #level-notification {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: rgba(0, 0, 0, 0.9);
+    border: 2px solid #FFA500;
+    color: #FFA500;
+    padding: 20px 40px;
+    font-size: 24px;
+    font-family: monospace;
+    z-index: 1000;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    pointer-events: none;
+  }
 </style>
 </head>
 <body>
+<div id="level-notification"></div>
 <button class="settings-button" onclick="toggleSettings()">⚙️ Settings</button>
 <div class="settings-panel" id="settings-panel">
   <button class="settings-close" onclick="toggleSettings()">×</button>
@@ -1528,18 +1546,22 @@
     if (score >= currentConfig.scoreTarget) {
       if (level === 5) {
         // Game complete!
-        alert('Congratulations! You\'ve completed all levels!');
+        showNotification('Congratulations! You\'ve completed all levels!');
         if (dropInterval) {
           clearInterval(dropInterval);
           dropInterval = null;
         }
-        document.getElementById('start-screen').style.display = 'flex';
+        setTimeout(() => {
+          document.getElementById('start-screen').style.display = 'flex';
+        }, 2000);
       } else {
         // Advance to next level
-        alert(`Level ${level} Complete! Moving to Level ${level + 1}`);
+        showNotification(`Going to Level ${level + 1}`);
         level++;
         score = 0;
-        setupLevel(level);
+        setTimeout(() => {
+          setupLevel(level);
+        }, 1000);
       }
     }
   }
@@ -1585,6 +1607,15 @@
     
     // Update level progress display
     updateLevelProgress();
+  }
+
+  function showNotification(text) {
+    const notification = document.getElementById('level-notification');
+    notification.textContent = text;
+    notification.style.opacity = '1';
+    setTimeout(() => {
+      notification.style.opacity = '0';
+    }, 1500);
   }
 
   function toggleSettings() {
