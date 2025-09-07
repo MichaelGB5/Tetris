@@ -69,9 +69,98 @@
     50% { text-shadow: 0 0 20px rgba(255, 165, 0, 0.8); }
     100% { text-shadow: 0 0 10px rgba(255, 165, 0, 0.5); }
   }
+  
+  .settings-button {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    background: transparent;
+    border: 2px solid #FFA500;
+    color: white;
+    padding: 10px 20px;
+    cursor: pointer;
+    font-family: monospace;
+    z-index: 1001;
+  }
+  
+  .settings-panel {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: rgba(0, 0, 0, 0.95);
+    border: 2px solid #FFA500;
+    padding: 20px;
+    z-index: 1002;
+    min-width: 300px;
+    display: none;
+  }
+  
+  .settings-panel h2 {
+    color: #FFA500;
+    margin-top: 0;
+    margin-bottom: 20px;
+    text-align: center;
+  }
+  
+  .settings-option {
+    margin-bottom: 15px;
+  }
+  
+  .settings-option label {
+    display: block;
+    margin-bottom: 5px;
+    color: white;
+  }
+  
+  .settings-option select {
+    width: 100%;
+    padding: 5px;
+    background: black;
+    color: white;
+    border: 1px solid #FFA500;
+  }
+  
+  .settings-option input[type="checkbox"] {
+    margin-right: 10px;
+  }
+  
+  .settings-close {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    background: transparent;
+    border: none;
+    color: white;
+    cursor: pointer;
+    font-size: 20px;
+  }
+  
+  .ghost-piece {
+    opacity: 0.3;
+  }
 </style>
 </head>
 <body>
+<button class="settings-button" onclick="toggleSettings()">⚙️ Settings</button>
+<div class="settings-panel" id="settings-panel">
+  <button class="settings-close" onclick="toggleSettings()">×</button>
+  <h2>Settings</h2>
+  <div class="settings-option">
+    <label for="game-speed">Game Speed:</label>
+    <select id="game-speed" onchange="updateGameSpeed()">
+      <option value="1000">Slow</option>
+      <option value="500">Quick</option>
+      <option value="200">Fast</option>
+    </select>
+  </div>
+  <div class="settings-option">
+    <label>
+      <input type="checkbox" id="ghost-toggle" onchange="toggleGhostPiece()" checked>
+      Show Ghost Piece
+    </label>
+  </div>
+</div>
 <div id="start-screen">
   <h1>TETRIS</h1>
   <button onclick="startGame()">START GAME</button>
@@ -701,6 +790,9 @@
     drawGrid();
     drawArena();
     if (player.matrix) {
+      // Draw ghost piece first so it appears behind the actual piece
+      drawGhostPiece();
+      // Draw actual piece
       drawMatrix(player.matrix, player.pos, player.color);
     }
   }
@@ -1068,6 +1160,54 @@
   });
 
   let dropInterval;
+  let gameSpeed = 1000; // default speed
+  let showGhostPiece = true;
+
+  function toggleSettings() {
+    const panel = document.getElementById('settings-panel');
+    panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+  }
+
+  function updateGameSpeed() {
+    const speedSelect = document.getElementById('game-speed');
+    gameSpeed = parseInt(speedSelect.value);
+    if (dropInterval) {
+      clearInterval(dropInterval);
+      dropInterval = setInterval(() => {
+        playerDrop();
+        draw();
+      }, gameSpeed);
+    }
+  }
+
+  function toggleGhostPiece() {
+    showGhostPiece = document.getElementById('ghost-toggle').checked;
+    draw();
+  }
+
+  function getGhostPosition() {
+    const ghost = {
+      pos: { x: player.pos.x, y: player.pos.y },
+      matrix: player.matrix
+    };
+
+    while (!collide(arena, ghost)) {
+      ghost.pos.y++;
+    }
+    ghost.pos.y--;
+
+    return ghost;
+  }
+
+  function drawGhostPiece() {
+    if (!showGhostPiece || !player.matrix) return;
+    
+    const ghost = getGhostPosition();
+    const originalAlpha = ctx.globalAlpha;
+    ctx.globalAlpha = 0.2;
+    drawMatrix(ghost.matrix, ghost.pos, player.color);
+    ctx.globalAlpha = originalAlpha;
+  }
 
   function startGame() {
     // Hide start screen
@@ -1107,7 +1247,7 @@
     dropInterval = setInterval(() => {
       playerDrop();
       draw();
-    }, 1000);
+    }, gameSpeed);
     
     // Initial draw
     draw();
