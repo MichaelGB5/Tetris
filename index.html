@@ -29,9 +29,53 @@
     text-align: center;
     margin-bottom: 6px;
   }
+  #start-screen {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.9);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+  }
+  #start-screen h1 {
+    font-size: 48px;
+    margin-bottom: 30px;
+    color: #FFA500;
+    text-shadow: 0 0 10px rgba(255, 165, 0, 0.5);
+    animation: glow 2s ease-in-out infinite;
+  }
+  #start-screen button {
+    font-size: 24px;
+    padding: 15px 40px;
+    background: transparent;
+    color: white;
+    border: 2px solid #FFA500;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    font-family: monospace;
+  }
+  #start-screen button:hover {
+    background: #FFA500;
+    color: black;
+    transform: scale(1.1);
+  }
+  @keyframes glow {
+    0% { text-shadow: 0 0 10px rgba(255, 165, 0, 0.5); }
+    50% { text-shadow: 0 0 20px rgba(255, 165, 0, 0.8); }
+    100% { text-shadow: 0 0 10px rgba(255, 165, 0, 0.5); }
+  }
 </style>
 </head>
 <body>
+<div id="start-screen">
+  <h1>TETRIS</h1>
+  <button onclick="startGame()">START GAME</button>
+</div>
 <div style="display: flex; flex-direction: column; align-items: center;">
   <div style="display: flex; justify-content: center; align-items: flex-end; gap: 40px; margin-bottom: 8px;">
     <div style="text-align: center;">
@@ -70,10 +114,13 @@
   const nextCtx = nextCanvas.getContext('2d');
   nextCtx.scale(20, 20);
 
-  const arenaWidth = 10;
-  const arenaHeight = 20;
-
-  let arenaOffset = 0; // Track how much the arena has expanded
+  const initialWidth = 10;
+  const initialHeight = 20;
+  let arenaWidth = initialWidth;
+  let arenaHeight = initialHeight;
+  
+  let score = 0;
+  let level = 1;
 
   function expandArena() {
     // Add 10 columns to both sides
@@ -138,10 +185,62 @@
   }
 
   // Arena grid
-  const arena = [];
-  for (let i = 0; i < arenaHeight; i++) {
-    arena.push(new Array(arenaWidth).fill(0));
+  function createArena(width, height) {
+    const newArena = [];
+    for (let i = 0; i < height; i++) {
+      newArena.push(new Array(width).fill(0));
+    }
+    return newArena;
   }
+
+  function switchToLevel2Arena() {
+    arenaWidth = 30;
+    arenaHeight = 20;
+    
+    // Create new arena with new dimensions
+    const newArena = createArena(arenaWidth, arenaHeight);
+    
+    // Clear the old arena
+    arena.length = 0;
+    arena.push(...newArena);
+    
+    // Update canvas size
+    canvas.width = arenaWidth * 20;
+    canvas.height = arenaHeight * 20;
+    
+    // Reset player position
+    playerReset();
+    
+    // Update the scale to maintain block size
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.scale(20, 20);
+  }
+
+  function switchToLevel1Arena() {
+    arenaWidth = initialWidth;
+    arenaHeight = initialHeight;
+    
+    // Create new arena with original dimensions
+    const newArena = createArena(arenaWidth, arenaHeight);
+    
+    // Clear the old arena
+    arena.length = 0;
+    arena.push(...newArena);
+    
+    // Update canvas size
+    canvas.width = arenaWidth * 20;
+    canvas.height = arenaHeight * 20;
+    
+    // Reset player position
+    playerReset();
+    
+    // Update the scale to maintain block size
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.scale(20, 20);
+  }
+
+  // Initialize arena with level 1 dimensions
+  const arena = createArena(arenaWidth, arenaHeight);
 
   const pieces = {
     1: {
@@ -243,20 +342,16 @@
 
     cachedDiscardUsed = false; // reset discard usage on new piece
 
-    // Account for arena offset in spawn position
-    if (firstRowCleared) {
-      player.pos.x += arenaOffset;
-    }
-
     if (collide(arena, player)) {
-      // Game over, clear arena
-      for(let y=0; y<arena.length; y++) {
-        arena[y].fill(0);
+      // Game over
+      alert('Game Over! Score: ' + score);
+      // Stop the game loop
+      if (dropInterval) {
+        clearInterval(dropInterval);
+        dropInterval = null;
       }
-      firstRowCleared = false; // Reset expansion state
-      arenaOffset = 0; // Reset arena offset
-      canvas.width = arenaWidth * 20; // Reset canvas size
-      ctx.scale(20, 20); // Reset scale
+      // Show start screen
+      document.getElementById('start-screen').style.display = 'flex';
     }
   }
 
@@ -319,21 +414,18 @@
   }
 
   function drawArena() {
-    const fullWidth = arenaWidth + (arenaOffset * 2);
     for(let y = 0; y < arenaHeight; y++) {
-      for(let x = 0; x < fullWidth; x++) {
+      for(let x = 0; x < arenaWidth; x++) {
         const val = arena[y][x];
         if(val !== 0) {
           const color = pieces[val].color;
           const top = (y === 0 || arena[y-1][x] === 0);
           const bottom = (y === arenaHeight-1 || arena[y+1][x] === 0);
           const left = (x === 0 || arena[y][x-1] === 0);
-          const right = (x === fullWidth-1 || arena[y][x+1] === 0);
+          const right = (x === arenaWidth-1 || arena[y][x+1] === 0);
 
-          // Translate the x-coordinate back to game coordinates
-          const gameX = x - arenaOffset;
           drawConnectedBlock(
-            gameX, y, 1, 1, 0.15, color,
+            x, y, 1, 1, 0.15, color,
             {top, bottom, left, right}
           );
         }
@@ -342,12 +434,11 @@
   }
 
   function drawGrid() {
-    const fullWidth = arenaWidth + (arenaOffset * 2);
     ctx.strokeStyle = '#333';
     ctx.lineWidth = 0.05;
 
-    // Draw vertical lines (cover full expanded width)
-    for(let x = -arenaOffset; x <= arenaWidth + arenaOffset * 2; x++) {
+    // Draw vertical lines
+    for(let x = 0; x <= arenaWidth; x++) {
       ctx.beginPath();
       ctx.moveTo(x, 0);
       ctx.lineTo(x, arenaHeight);
@@ -357,12 +448,12 @@
     // Draw horizontal lines
     for(let y = 0; y <= arenaHeight; y++) {
       ctx.beginPath();
-      ctx.moveTo(-arenaOffset, y);
-      ctx.lineTo(arenaWidth + arenaOffset * 2, y);
+      ctx.moveTo(0, y);
+      ctx.lineTo(arenaWidth, y);
       ctx.stroke();
     }
 
-    // Highlight the original play area
+    // Highlight the play area
     ctx.strokeStyle = '#666';
     ctx.lineWidth = 0.1;
     ctx.strokeRect(0, 0, arenaWidth, arenaHeight);
@@ -389,18 +480,15 @@
   function collide(arena, player) {
     const m = player.matrix;
     const o = player.pos;
-    const fullWidth = arenaWidth + (arenaOffset * 2);
     
     for (let y = 0; y < m.length; y++) {
       for (let x = 0; x < m[y].length; x++) {
         if (m[y][x] !== 0) {
-          const worldX = o.x + x;
-          const arenaX = worldX + arenaOffset;
           if (
             o.y + y >= arenaHeight ||
-            arenaX < 0 ||
-            arenaX >= fullWidth ||
-            arena[o.y + y][arenaX] !== 0
+            o.x + x < 0 ||
+            o.x + x >= arenaWidth ||
+            arena[o.y + y][o.x + x] !== 0
           ) {
             return true;
           }
@@ -412,14 +500,11 @@
 
   // Merge piece into arena
   function merge(arena, player) {
-    const fullWidth = arenaWidth + (arenaOffset * 2);
     player.matrix.forEach((row, y) => {
       row.forEach((value, x) => {
         if (value !== 0) {
-          const worldX = player.pos.x + x;
-          const arenaX = worldX + arenaOffset;
-          if (arenaX >= 0 && arenaX < fullWidth) {
-            arena[player.pos.y + y][arenaX] = player.id;
+          if (player.pos.x + x >= 0 && player.pos.x + x < arenaWidth) {
+            arena[player.pos.y + y][player.pos.x + x] = player.id;
           }
         }
       });
@@ -447,10 +532,9 @@
 
   function arenaSweep() {
     let rowCount = 0;
-    const fullWidth = arenaWidth + (arenaOffset * 2);
     
     outer: for (let y = arenaHeight - 1; y >= 0; y--) {
-      for (let x = 0; x < fullWidth; x++) {
+      for (let x = 0; x < arenaWidth; x++) {
         if (arena[y][x] === 0) {
           continue outer; // skip if not full
         }
@@ -463,16 +547,38 @@
     }
 
     if (rowCount > 0) {
+      // Update score
+      if (rowCount === 4) {
+        score += 40; // Tetris bonus
+      } else {
+        score += rowCount * 5; // 5 points per line
+      }
+      
       totalLinesCleared += rowCount;
       updateExplosionBar();
       
-      // If this is the first row cleared, expand the grid
-      if (!firstRowCleared) {
-        firstRowCleared = true;
-        expandArena();
-        // Update player position to account for the offset
-        player.pos.x += arenaOffset;
+      // Check for level up and win condition
+      if (score >= 20 && level === 1) {
+        level = 2;
+        switchToLevel2Arena();
       }
+      
+      if (score >= 100) {
+        // Win condition!
+        alert('Congratulations! You won with ' + score + ' points!');
+        // Stop the game loop
+        if (dropInterval) {
+          clearInterval(dropInterval);
+          dropInterval = null;
+        }
+        // Show start screen
+        document.getElementById('start-screen').style.display = 'flex';
+      }
+
+      // Update score display
+      document.getElementById('info').innerHTML = 
+        '<div>Score: ' + score + ' | Level: ' + level + '</div>' +
+        '<div>Controls: ← → ↓ to move/drop, ↑ to rotate, C to cache/swap, Space for hard drop, L to discard cached (once per game), D for explosion</div>';
     }
     
     return rowCount;
@@ -961,15 +1067,51 @@
     }
   });
 
-  fillNextQueue();
-  playerReset();
-  updatePreviews();
-  draw();
+  let dropInterval;
 
-  let dropInterval = setInterval(() => {
-    playerDrop();
+  function startGame() {
+    // Hide start screen
+    document.getElementById('start-screen').style.display = 'none';
+    
+    // Reset game state
+    score = 0;
+    level = 1;
+    totalLinesCleared = 0;
+    explosionAvailable = false;
+    globalCacheDiscardUsed = false;
+    cachedPiece = null;
+    
+    // Clear arena
+    arena.length = 0;
+    arena.push(...createArena(initialWidth, initialHeight));
+    
+    // Initialize game
+    fillNextQueue();
+    playerReset();
+    updatePreviews();
+    
+    // Update display
+    document.getElementById('info').innerHTML = 
+      '<div>Score: 0 | Level: 1</div>' +
+      '<div>Controls: ← → ↓ to move/drop, ↑ to rotate, C to cache/swap, Space for hard drop, L to discard cached (once per game), D for explosion</div>';
+    
+    // Reset explosion bar
+    document.querySelector('#explosion-bar .fill').style.width = '0%';
+    document.querySelector('#explosion-bar .fill').style.animation = 'none';
+    document.getElementById('lines-text').textContent = '0/30 lines';
+    
+    // Start game loop
+    if (dropInterval) {
+      clearInterval(dropInterval);
+    }
+    dropInterval = setInterval(() => {
+      playerDrop();
+      draw();
+    }, 1000);
+    
+    // Initial draw
     draw();
-  }, 1000);
+  }
 
   // Update the info text to be more specific about the one-time cache discard
   document.querySelector('#info div').textContent = 'Controls: ← → ↓ to move/drop, ↑ to rotate, C to cache/swap, Space for hard drop, L to discard cached (once per game), D for explosion';
