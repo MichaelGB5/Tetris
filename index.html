@@ -139,9 +139,22 @@
   .ghost-piece {
     opacity: 0.3;
   }
+
+  #score-display {
+    position: fixed;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 48px;
+    color: #FFA500;
+    text-shadow: 0 0 10px rgba(255, 165, 0, 0.5);
+    font-family: monospace;
+    z-index: 999;
+  }
 </style>
 </head>
 <body>
+<div id="score-display">SCORE: 0</div>
 <button class="settings-button" onclick="toggleSettings()">⚙️ Settings</button>
 <div class="settings-panel" id="settings-panel">
   <button class="settings-close" onclick="toggleSettings()">×</button>
@@ -163,6 +176,21 @@
 </div>
 <div id="start-screen">
   <h1>TETRIS</h1>
+  <div style="margin-bottom: 20px; text-align: center;">
+    <label for="level-select" style="color: #FFA500; display: block; margin-bottom: 10px;">Select Starting Level:</label>
+    <select id="level-select" style="background: black; color: white; border: 2px solid #FFA500; padding: 5px 10px; font-size: 18px; font-family: monospace;">
+      <option value="1">Level 1 - Normal</option>
+      <option value="2">Level 2 - Split Arena</option>
+      <option value="3">Level 3 - Checkerboard</option>
+      <option value="4">Level 4 - Triple Split</option>
+      <option value="5">Level 5 - Maze</option>
+      <option value="6">Level 6 - Spiral</option>
+      <option value="7">Level 7 - Diamond</option>
+      <option value="8">Level 8 - Zigzag</option>
+      <option value="9">Level 9 - Cross</option>
+      <option value="10">Level 10 - Final Challenge</option>
+    </select>
+  </div>
   <button onclick="startGame()">START GAME</button>
 </div>
 <div style="display: flex; flex-direction: column; align-items: center;">
@@ -177,9 +205,15 @@
     </div>
   </div>
   <canvas id="tetris" width="200" height="440" style="margin-bottom: 12px;"></canvas>
-  <div id="explosion-bar" style="width: 200px; height: 20px; border: 2px solid #FFA500; margin-bottom: 12px; position: relative; overflow: hidden; cursor: pointer;" onclick="if(explosionAvailable) shootDownAndClearTop()" title="Clear 30 lines to activate explosion">
-    <div class="fill" style="width: 0%; height: 100%; background: linear-gradient(to right, #FF4500, #FFA500); transition: width 0.3s ease-out;"></div>
-    <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 12px; text-shadow: 1px 1px 2px black;">
+  <div class="progress-bar" id="level-bar" style="margin-bottom: 12px;">
+    <div class="fill" style="width: 0%"></div>
+    <div class="text">
+      <span id="level-text">Level 1 - 0/5 lines</span>
+    </div>
+  </div>
+  <div id="explosion-bar" class="progress-bar" style="cursor: pointer;" onclick="if(explosionAvailable) shootDownAndClearTop()" title="Clear 30 lines to activate explosion">
+    <div class="fill" style="width: 0%"></div>
+    <div class="text">
       <span id="lines-text">0/30 lines</span>
     </div>
   </div>
@@ -207,10 +241,154 @@
   const initialHeight = 20;
   let arenaWidth = initialWidth;
   let arenaHeight = initialHeight;
+  let arenaOffset = 0;
   
   let score = 0;
   let level = 1;
-
+  let linesForNextLevel = 5;
+  
+  const levelConfig = {
+    1: { 
+      width: 10, 
+      height: 20,
+      scoreTarget: 1000,
+      setupGrid: function(arena) {} // Normal grid
+    },
+    2: { 
+      width: 30, 
+      height: 20,
+      scoreTarget: 1000,
+      setupGrid: function(arena) {
+        // Create walls in the middle
+        for (let y = 5; y < 15; y++) {
+          arena[y][14] = 8; // Wall piece
+          arena[y][15] = 8;
+        }
+      }
+    },
+    3: { 
+      width: 30, 
+      height: 20,
+      scoreTarget: 1000,
+      setupGrid: function(arena) {
+        // Checkerboard pattern obstacles
+        for (let y = 10; y < 20; y += 2) {
+          for (let x = 5; x < 25; x += 4) {
+            arena[y][x] = 8;
+          }
+        }
+      }
+    },
+    4: { 
+      width: 30, 
+      height: 20,
+      scoreTarget: 1000,
+      setupGrid: function(arena) {
+        // Three vertical walls
+        for (let y = 5; y < 15; y++) {
+          arena[y][8] = 8;
+          arena[y][15] = 8;
+          arena[y][22] = 8;
+        }
+      }
+    },
+    5: { 
+      width: 30, 
+      height: 20,
+      scoreTarget: 1000,
+      setupGrid: function(arena) {
+        // Maze-like pattern
+        for (let y = 5; y < 15; y += 3) {
+          for (let x = 5; x < 25; x++) {
+            arena[y][x] = 8;
+          }
+          arena[y][10] = 0;
+          arena[y][20] = 0;
+        }
+      }
+    },
+    6: {
+      width: 30,
+      height: 20,
+      scoreTarget: 1000,
+      setupGrid: function(arena) {
+        // Spiral pattern
+        const center = { x: Math.floor(arena[0].length / 2), y: Math.floor(arena.length / 2) };
+        for (let i = 0; i < 10; i++) {
+          arena[center.y + i][center.x] = 8;
+          arena[center.y][center.x + i] = 8;
+          arena[center.y - i][center.x] = 8;
+          arena[center.y][center.x - i] = 8;
+        }
+      }
+    },
+    7: {
+      width: 30,
+      height: 20,
+      scoreTarget: 1000,
+      setupGrid: function(arena) {
+        // Diamond pattern
+        for (let y = 0; y < arena.length; y++) {
+          for (let x = 0; x < arena[0].length; x++) {
+            if ((x + y) % 4 === 0 && x > 5 && x < arena[0].length - 5 && y > 5) {
+              arena[y][x] = 8;
+            }
+          }
+        }
+      }
+    },
+    8: {
+      width: 30,
+      height: 20,
+      scoreTarget: 1000,
+      setupGrid: function(arena) {
+        // Zigzag walls
+        for (let y = 5; y < arena.length - 5; y++) {
+          const offset = Math.floor(y / 3) % 2 === 0 ? 10 : 20;
+          arena[y][offset] = 8;
+        }
+      }
+    },
+    9: {
+      width: 30,
+      height: 20,
+      scoreTarget: 1000,
+      setupGrid: function(arena) {
+        // Cross pattern
+        const center = { x: Math.floor(arena[0].length / 2), y: Math.floor(arena.length / 2) };
+        for (let i = -5; i <= 5; i++) {
+          if (center.x + i >= 0 && center.x + i < arena[0].length) {
+            arena[center.y][center.x + i] = 8;
+          }
+          if (center.y + i >= 0 && center.y + i < arena.length) {
+            arena[center.y + i][center.x] = 8;
+          }
+        }
+      }
+    },
+    10: {
+      width: 30,
+      height: 20,
+      scoreTarget: 1000,
+      setupGrid: function(arena) {
+        // Final challenge: Multiple patterns combined
+        // Corners
+        for (let i = 0; i < 5; i++) {
+          arena[i][i] = 8;
+          arena[i][arena[0].length - 1 - i] = 8;
+          arena[arena.length - 1 - i][i] = 8;
+          arena[arena.length - 1 - i][arena[0].length - 1 - i] = 8;
+        }
+        // Center cross
+        const center = { x: Math.floor(arena[0].length / 2), y: Math.floor(arena.length / 2) };
+        arena[center.y][center.x] = 8;
+        arena[center.y - 1][center.x] = 8;
+        arena[center.y + 1][center.x] = 8;
+        arena[center.y][center.x - 1] = 8;
+        arena[center.y][center.x + 1] = 8;
+      }
+    }
+  };
   function expandArena() {
     // Add 10 columns to both sides
     const newColumns = 10;
@@ -328,9 +506,7 @@
     ctx.scale(20, 20);
   }
 
-  // Initialize arena with level 1 dimensions
-  const arena = createArena(arenaWidth, arenaHeight);
-
+  // Initialize pieces array
   const pieces = {
     1: {
       matrix: [
@@ -389,6 +565,15 @@
       color: 'red'
     }
   };
+
+  // Add the wall piece to pieces array
+  pieces[8] = {
+    matrix: [[1]],
+    color: '#888888' // Gray color for wall blocks
+  };
+
+  // Initialize arena with level 1 dimensions
+  const arena = createArena(arenaWidth, arenaHeight);
 
   // The queue of next pieces (IDs)
   const nextPieces = [];
@@ -579,6 +764,7 @@
             o.x + x >= arenaWidth ||
             arena[o.y + y][o.x + x] !== 0
           ) {
+            // Consider wall blocks (8) as solid for collision
             return true;
           }
         }
@@ -638,23 +824,22 @@
     if (rowCount > 0) {
       // Update score
       if (rowCount === 4) {
-        score += 40; // Tetris bonus
+        score += 400; // Tetris bonus
       } else {
-        score += rowCount * 5; // 5 points per line
+        score += rowCount * 100; // 100 points per line
       }
+      
+      // Update big score display
+      document.getElementById('score-display').textContent = `SCORE: ${score}`;
       
       totalLinesCleared += rowCount;
       updateExplosionBar();
+      updateLevelProgress();
       
-      // Check for level up and win condition
-      if (score >= 20 && level === 1) {
-        level = 2;
-        switchToLevel2Arena();
-      }
-      
-      if (score >= 100) {
+      // Check for win condition (completing level 10)
+      if (level > 10) {
         // Win condition!
-        alert('Congratulations! You won with ' + score + ' points!');
+        alert('Congratulations! You completed all levels with ' + score + ' points!');
         // Stop the game loop
         if (dropInterval) {
           clearInterval(dropInterval);
@@ -1108,6 +1293,58 @@
     }
     draw();
   }  // Event handlers
+  // Make startGame function globally available
+  window.startGame = function() {
+    console.log('Starting game...');
+    
+    // Hide start screen
+    document.getElementById('start-screen').style.display = 'none';
+    
+    // Get selected level
+    level = parseInt(document.getElementById('level-select').value);
+    
+    // Reset game state
+    score = 0;
+    totalLinesCleared = 0;
+    explosionAvailable = false;
+    globalCacheDiscardUsed = false;
+    cachedPiece = null;
+    
+    // Clear any existing intervals
+    if (dropInterval) {
+      clearInterval(dropInterval);
+    }
+
+    try {
+      // Setup the selected level
+      setupLevel(level);
+      
+      // Initialize game pieces
+      fillNextQueue();
+      playerReset();
+      updatePreviews();
+      
+      // Reset progress bars
+      document.querySelector('#explosion-bar .fill').style.width = '0%';
+      document.querySelector('#explosion-bar .fill').style.animation = 'none';
+      document.getElementById('lines-text').textContent = '0/30 lines';
+      
+      // Update level progress display
+      updateLevelProgress();
+      
+      // Start game loop with fixed speed
+      dropInterval = setInterval(() => {
+        playerDrop();
+        draw();
+      }, 1000);
+      
+      // Initial draw
+      draw();
+    } catch (error) {
+      console.error('Error starting game:', error);
+    }
+  };
+
   window.addEventListener('keydown', event => {
     if(event.key === 'ArrowLeft') {
       playerMove(-1);
@@ -1162,6 +1399,85 @@
   let dropInterval;
   let gameSpeed = 1000; // default speed
   let showGhostPiece = true;
+  let linesCleared = 0;
+
+  function updateLevelProgress() {
+    // Check if we've reached the score target for this level
+    const currentConfig = levelConfig[level];
+    const progress = (score / currentConfig.scoreTarget) * 100;
+    
+    // Update level progress bar
+    document.querySelector('#level-bar .fill').style.width = progress + '%';
+    document.getElementById('level-text').textContent = 
+      `Level ${level} - ${score}/${currentConfig.scoreTarget} points`;
+    
+    // Update game info display
+    document.getElementById('info').innerHTML = 
+      `<div>Score: ${score} | Level: ${level}</div>` +
+      '<div>Controls: ← → ↓ to move/drop, ↑ to rotate, C to cache/swap, Space for hard drop, L to discard cached (once per game), D for explosion</div>';
+    
+    // Check for level completion
+    if (score >= currentConfig.scoreTarget) {
+      if (level === 5) {
+        // Game complete!
+        alert('Congratulations! You\'ve completed all levels!');
+        if (dropInterval) {
+          clearInterval(dropInterval);
+          dropInterval = null;
+        }
+        document.getElementById('start-screen').style.display = 'flex';
+      } else {
+        // Advance to next level
+        alert(`Level ${level} Complete! Moving to Level ${level + 1}`);
+        level++;
+        score = 0;
+        setupLevel(level);
+      }
+    }
+  }
+  
+  function setupLevel(newLevel) {
+    const config = levelConfig[newLevel];
+    
+    // Update dimensions
+    arenaWidth = config.width;
+    arenaHeight = config.height;
+    
+    // Create new arena
+    const newArena = createArena(arenaWidth, arenaHeight);
+    
+    // Apply level-specific grid setup
+    config.setupGrid(newArena);
+    
+    // Update the arena
+    arena.length = 0;
+    arena.push(...newArena);
+    
+    // Update canvas size and scale
+    canvas.width = arenaWidth * 20;
+    canvas.height = arenaHeight * 20;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.scale(20, 20);
+    
+    // Update previews canvas sizes if needed for wider grid
+    if (arenaWidth > initialWidth) {
+      cachedCanvas.width = 80;
+      cachedCanvas.height = 80;
+      nextCanvas.width = 80;
+      nextCanvas.height = 80;
+      cachedCtx.setTransform(1, 0, 0, 1, 0, 0);
+      nextCtx.setTransform(1, 0, 0, 1, 0, 0);
+      cachedCtx.scale(20, 20);
+      nextCtx.scale(20, 20);
+    }
+    
+    // Center the player's starting position
+    player.pos.x = Math.floor((arenaWidth - (player.matrix ? player.matrix[0].length : 0)) / 2);
+    player.pos.y = 0;
+    
+    // Update level progress display
+    updateLevelProgress();
+  }
 
   function toggleSettings() {
     const panel = document.getElementById('settings-panel');
@@ -1213,48 +1529,69 @@
     // Hide start screen
     document.getElementById('start-screen').style.display = 'none';
     
+    // Get selected level
+    level = parseInt(document.getElementById('level-select').value);
+    
     // Reset game state
     score = 0;
-    level = 1;
     totalLinesCleared = 0;
     explosionAvailable = false;
     globalCacheDiscardUsed = false;
     cachedPiece = null;
     
-    // Clear arena
-    arena.length = 0;
-    arena.push(...createArena(initialWidth, initialHeight));
+    // Clear any existing intervals
+    if (dropInterval) {
+      clearInterval(dropInterval);
+    }
     
-    // Initialize game
+    // Setup the selected level
+    setupLevel(level);
+    
+    // Initialize game pieces
     fillNextQueue();
     playerReset();
     updatePreviews();
     
-    // Update display
-    document.getElementById('info').innerHTML = 
-      '<div>Score: 0 | Level: 1</div>' +
-      '<div>Controls: ← → ↓ to move/drop, ↑ to rotate, C to cache/swap, Space for hard drop, L to discard cached (once per game), D for explosion</div>';
-    
-    // Reset explosion bar
+    // Reset progress bars
     document.querySelector('#explosion-bar .fill').style.width = '0%';
     document.querySelector('#explosion-bar .fill').style.animation = 'none';
     document.getElementById('lines-text').textContent = '0/30 lines';
     
-    // Start game loop
-    if (dropInterval) {
-      clearInterval(dropInterval);
-    }
+    // Update level progress display
+    updateLevelProgress();
+    
+    // Start game loop with fixed speed
     dropInterval = setInterval(() => {
       playerDrop();
       draw();
-    }, gameSpeed);
+    }, 1000);
+    
+    // Initial draw
+    draw();
     
     // Initial draw
     draw();
   }
 
-  // Update the info text to be more specific about the one-time cache discard
-  document.querySelector('#info div').textContent = 'Controls: ← → ↓ to move/drop, ↑ to rotate, C to cache/swap, Space for hard drop, L to discard cached (once per game), D for explosion';
+  // Initialize the game when the document is fully loaded
+  document.addEventListener('DOMContentLoaded', function() {
+    // Initialize game state
+    fillNextQueue();
+    updatePreviews();
+    draw();
+
+    // Initialize score display
+    document.getElementById('info').innerHTML = 
+      '<div>Score: 0 | Level: 1</div>' +
+      '<div>Controls: ← → ↓ to move/drop, ↑ to rotate, C to cache/swap, Space for hard drop, L to discard cached (once per game), D for explosion</div>';
+
+    // Make sure start screen is visible initially
+    document.getElementById('start-screen').style.display = 'flex';
+    
+    // Initialize settings
+    document.getElementById('game-speed').value = '1000';
+    document.getElementById('ghost-toggle').checked = true;
+  });
 </script>
 </body>
 </html>
